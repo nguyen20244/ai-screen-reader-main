@@ -1,0 +1,38 @@
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Secrets and environment
+.env
+.env.*
+!.env.example
+secrets/
+*secret*
+
+# Logs and temporary files
+logs/
+*.log
+*.tmp
+temp/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python cache
+.pytest_cache/
+.mypy_cache/
+# Browser profile and personal data
+data/gemini_profile/
