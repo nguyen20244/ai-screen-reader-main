@@ -47,6 +47,9 @@ class ScreenCapture:
         self._prev_frame: Optional[np.ndarray] = None
         self._diff_thread: Optional[threading.Thread] = None
         self._diff_running = False
+
+        self._diff_paused = False
+        self._watch_lock = threading.RLock()
         self._on_change_callback: Optional[Callable] = None
 
     # ------------------------------------------------------------------
@@ -57,13 +60,18 @@ class ScreenCapture:
         try:
             screenshot = None
 
-            if self.capture_mode == 'browser' and self.window_capture:
+            if self.capture_mode == 'full_screen':
+                # OS-level capture of the entire desktop; do not focus or select a browser.
+                screenshot = pyautogui.screenshot()
+            elif self.capture_mode == 'browser' and self.window_capture:
                 screenshot = self.window_capture.capture_browser_content()
-                if screenshot:
-                    self.logger.info(f"Browser content captured: {screenshot.size}")
-                    return screenshot
-                else:
-                    self.logger.warning("Browser capture failed, falling back to full screen")
+
+            if screenshot:
+                label = "Full-screen" if self.capture_mode == "full_screen" else "Browser"
+                self.logger.info(f"{label} content captured: {screenshot.size}")
+                return screenshot
+            else:
+                self.logger.warning("Browser capture failed, falling back to full screen")
 
             if region:
                 screenshot = pyautogui.screenshot(region=region)
@@ -115,50 +123,73 @@ class ScreenCapture:
             self._diff_thread.join(timeout=3)
         self.logger.info("Screen diff watcher stopped.")
 
+
+    def pause_diff_watcher(self):
+        """Pause frame detection while Gemini is visible/processing."""
+        with self._watch_lock:
+            self._diff_paused = True
+        self.logger.info("Screen diff watcher paused.")
+
+    def resume_diff_watcher(self, reset_baseline=True):
+        """Resume detection; reset baseline to avoid triggering on Gemini UI."""
+        with self._watch_lock:
+            if reset_baseline:
+                self._prev_frame = None
+            self._diff_paused = False
+        self.logger.info("Screen diff watcher resumed; baseline will be recaptured.")
+
     def _diff_loop(self):
-        """Background thread: liên tục so sánh frame."""
+        """Background thread: compare frames with synchronized pause/resume."""
         while self._diff_running:
+            with self._watch_lock:
+                paused = self._diff_paused
+            if paused:
+                time.sleep(0.1)
+                continue
+
             try:
                 screenshot = self.capture_screen()
                 if screenshot is None:
                     time.sleep(DIFF_CHECK_INTERVAL)
                     continue
 
-                # Downscale để so sánh nhanh (không cần full res)
                 small = screenshot.resize((320, 180), Image.Resampling.BILINEAR)
-                frame = np.array(small.convert("L"))  # grayscale
+                frame = np.array(small.convert("L"))
 
-                if self._prev_frame is not None:
-                    diff        = cv2.absdiff(self._prev_frame, frame)
+                # Lock through callback so pause() cannot return while an old frame
+                # is still about to be queued by the watcher thread.
+                with self._watch_lock:
+                    if self._diff_paused:
+                        continue
+
+                    previous = self._prev_frame
+                    if previous is None:
+                        # First frame after resume is baseline only, never a trigger.
+                        self._prev_frame = frame
+                        continue
+
+                    diff = cv2.absdiff(previous, frame)
                     changed_pct = np.count_nonzero(diff > 15) / diff.size
+                    self._prev_frame = frame
 
                     if changed_pct >= DIFF_THRESHOLD:
                         self.logger.info(
                             f"Màn hình thay đổi {changed_pct:.1%} → trigger scan"
                         )
-                        # Gọi callback với ảnh full-res
                         if self._on_change_callback:
                             try:
                                 self._on_change_callback(screenshot)
                             except Exception as cb_err:
                                 self.logger.error(f"on_change callback error: {cb_err}")
 
-                        # Reset prev để tránh trigger liên tục cùng 1 frame
-                        self._prev_frame = frame
-                        # Chờ thêm 3s trước khi check tiếp (debounce)
-                        time.sleep(3.0)
-                        continue
-
-                self._prev_frame = frame
+                if changed_pct >= DIFF_THRESHOLD:
+                    time.sleep(3.0)
+                    continue
 
             except Exception as e:
                 self.logger.error(f"Diff loop error: {e}")
 
             time.sleep(DIFF_CHECK_INTERVAL)
-
-    # ------------------------------------------------------------------
-    # Existing helpers (giữ nguyên)
-    # ------------------------------------------------------------------
 
     def set_capture_mode(self, mode: str):
         if mode in ['full_screen', 'browser', 'active_window']:
