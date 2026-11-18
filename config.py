@@ -27,6 +27,15 @@ class Config:
         # Screen Capture Settings
         self.capture_full_screen: bool = True
         self.capture_region: Optional[tuple] = None  # (x, y, width, height)
+
+        # Crop sau khi chụp — cắt bỏ browser UI, taskbar, sidebar
+        # Chỉnh các giá trị này trong .env hoặc trực tiếp ở đây
+        # Mặc định: lấy vùng câu hỏi Cyber Campus (không có sidebar nav lớn)
+        self.crop_enabled: bool = os.getenv('CROP_ENABLED', 'true').lower() == 'true'
+        self.crop_left:    float = float(os.getenv('CROP_LEFT',   '0.00'))  # giữ từ cạnh trái
+        self.crop_top:     float = float(os.getenv('CROP_TOP',    '0.08'))  # bỏ browser bar trên
+        self.crop_right:   float = float(os.getenv('CROP_RIGHT',  '1.00'))  # giữ đến cạnh phải
+        self.crop_bottom:  float = float(os.getenv('CROP_BOTTOM', '0.95'))  # bỏ taskbar dưới
         
         # Question Detection Settings
         self.question_patterns = [
