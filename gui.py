@@ -10,12 +10,19 @@ from typing import Optional, List
 from config import config
 from question_detector import Question
 from ai_integration import AIResponse
+import pyttsx3
 
 class ScreenReaderGUI:
     """Main GUI application for the AI Screen Reader"""
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        
+        # TTS engine
+        self.tts_engine = pyttsx3.init()
+        self.tts_engine.setProperty('rate', 150)
+        self.tts_engine.setProperty('volume', 1.0)
+        self._tts_lock = threading.Lock()
         
         # Initialize main window
         self.root = tk.Tk()
@@ -103,7 +110,37 @@ class ScreenReaderGUI:
             text="Settings", 
             command=self.open_settings
         )
-        settings_button.grid(row=0, column=5)
+        settings_button.grid(row=0, column=5, padx=(0, 10))
+
+        # TTS toggle checkbox
+        self.tts_var = tk.BooleanVar(value=True)
+        tts_check = ttk.Checkbutton(
+            control_frame,
+            text="🔊 Đọc kết quả",
+            variable=self.tts_var
+        )
+        tts_check.grid(row=0, column=6, padx=(0, 10))
+
+        # TTS speed control
+        ttk.Label(control_frame, text="Tốc độ:").grid(row=0, column=7, padx=(0, 5))
+        self.tts_rate_var = tk.IntVar(value=150)
+        tts_rate_spin = ttk.Spinbox(
+            control_frame,
+            from_=80,
+            to=300,
+            width=6,
+            textvariable=self.tts_rate_var,
+            command=self.update_tts_rate
+        )
+        tts_rate_spin.grid(row=0, column=8, padx=(0, 5))
+
+        # Stop speech button
+        stop_tts_button = ttk.Button(
+            control_frame,
+            text="⏹ Dừng đọc",
+            command=self.stop_speaking
+        )
+        stop_tts_button.grid(row=0, column=9)
     
     def create_status_panel(self, parent):
         """Create status information panel"""
@@ -153,6 +190,15 @@ class ScreenReaderGUI:
         # Answers tab
         answers_frame = ttk.Frame(notebook)
         notebook.add(answers_frame, text="AI Answers")
+
+        # Nút đọc lại trong tab Answers
+        btn_frame = ttk.Frame(answers_frame)
+        btn_frame.pack(fill=tk.X, padx=5, pady=(5, 0))
+        ttk.Button(
+            btn_frame,
+            text="🔊 Đọc lại kết quả",
+            command=self.replay_answers
+        ).pack(side=tk.LEFT)
         
         self.answers_display = scrolledtext.ScrolledText(
             answers_frame, 
@@ -204,6 +250,43 @@ class ScreenReaderGUI:
         gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
         logging.getLogger().addHandler(gui_handler)
     
+    # ------------------------------------------------------------------ #
+    #  TTS helpers                                                         #
+    # ------------------------------------------------------------------ #
+
+    def speak(self, text: str):
+        """Đọc text thành tiếng trong thread riêng để không block GUI"""
+        if not self.tts_var.get():
+            return
+        def _run():
+            with self._tts_lock:
+                self.tts_engine.say(text)
+                self.tts_engine.runAndWait()
+        threading.Thread(target=_run, daemon=True).start()
+
+    def stop_speaking(self):
+        """Dừng đọc ngay lập tức"""
+        try:
+            self.tts_engine.stop()
+        except Exception:
+            pass
+
+    def update_tts_rate(self):
+        """Cập nhật tốc độ đọc theo spinbox"""
+        try:
+            self.tts_engine.setProperty('rate', self.tts_rate_var.get())
+        except Exception:
+            pass
+
+    def replay_answers(self):
+        """Đọc lại kết quả đang hiển thị"""
+        if self.current_responses:
+            answers = [r.answer for r in self.current_responses if r.answer and not r.error]
+            if answers:
+                self.speak(" ".join(answers))
+
+    # ------------------------------------------------------------------ #
+
     def toggle_reading(self):
         """Toggle the screen reading process"""
         if self.is_running:
@@ -272,10 +355,12 @@ class ScreenReaderGUI:
         self.questions_label.config(text=f"Questions found: {len(questions)}")
     
     def update_answers_display(self, responses: List[AIResponse]):
-        """Update the answers display"""
+        """Update the answers display and read aloud via TTS"""
         self.answers_display.config(state=tk.NORMAL)
         self.answers_display.delete(1.0, tk.END)
         
+        all_answers = []
+
         for i, response in enumerate(responses, 1):
             self.answers_display.insert(tk.END, f"Answer {i} ({response.provider}):\n")
             self.answers_display.insert(tk.END, f"{response.answer}\n")
@@ -287,9 +372,16 @@ class ScreenReaderGUI:
                 self.answers_display.insert(tk.END, f"Error: {response.error}\n")
             
             self.answers_display.insert(tk.END, "-" * 50 + "\n\n")
+
+            if response.answer and not response.error:
+                all_answers.append(response.answer)
         
         self.answers_display.config(state=tk.DISABLED)
         self.current_responses = responses
+
+        # Đọc kết quả thành tiếng
+        if all_answers:
+            self.speak(" ".join(all_answers))
     
     def update_last_scan(self):
         """Update the last scan timestamp"""

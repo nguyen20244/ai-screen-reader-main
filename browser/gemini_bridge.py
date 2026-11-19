@@ -6,6 +6,8 @@ import queue
 import re
 import threading
 import time
+import tempfile
+import os
 
 import numpy as np
 import pyperclip
@@ -16,19 +18,19 @@ from screen_capture import ScreenCapture
 from browser.gemini_sender import GeminiSender
 
 # ---------------------------------------------------------------------------
-# Text-to-speech (pyttsx3 — offline, không cần internet)
+# Text-to-speech (gTTS — giọng Việt chuẩn, cần internet)
 # ---------------------------------------------------------------------------
 try:
-    import pyttsx3
-    _tts_engine = pyttsx3.init()
-    _tts_engine.setProperty('rate', 160)   # tốc độ đọc (wpm)
-    _tts_engine.setProperty('volume', 1.0)
+    from gtts import gTTS
+    import pygame
+    pygame.mixer.init()
     TTS_AVAILABLE = True
-except Exception:
-    _tts_engine = None
+except Exception as _tts_init_err:
     TTS_AVAILABLE = False
+    logging.getLogger("TTS").warning("gTTS/pygame không khởi động được: %s", _tts_init_err)
 
-_tts_lock = threading.Lock()   # pyttsx3 không thread-safe
+_tts_lock = threading.Lock()
+
 
 def _extract_answer_for_tts(response: str) -> str:
     """
@@ -46,18 +48,35 @@ def _extract_answer_for_tts(response: str) -> str:
     short = ' '.join(sentences[:3])
     return short
 
+
 def speak(text: str):
-    """Đọc text ra loa trong background thread (non-blocking)."""
+    """Đọc text tiếng Việt ra loa trong background thread (non-blocking)."""
     if not TTS_AVAILABLE:
         return
+
     def _run():
+        tmp = None
         with _tts_lock:
             try:
-                _tts_engine.say(text)
-                _tts_engine.runAndWait()
+                tts = gTTS(text=text, lang='vi')
+                with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
+                    tmp = f.name
+                tts.save(tmp)
+                pygame.mixer.music.load(tmp)
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy():
+                    pygame.time.Clock().tick(10)
             except Exception as e:
                 logging.getLogger("TTS").warning("TTS lỗi: %s", e)
+            finally:
+                if tmp and os.path.exists(tmp):
+                    try:
+                        os.unlink(tmp)
+                    except Exception:
+                        pass
+
     threading.Thread(target=_run, daemon=True).start()
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,8 +87,8 @@ logger = logging.getLogger("GeminiBridge")
 PROMPT = (
     "Đây là ảnh chụp màn hình chứa câu hỏi. "
     "Hãy đọc kỹ và trả lời CHÍNH XÁC, NGẮN GỌN. "
-    "Nếu là câu hỏi trắc nghiệm, chỉ cần trả lời đáp án đúng (A/B/C/D) "
-    "kèm giải thích 1-2 câu."
+    "Nếu là câu hỏi trắc nghiệm, chỉ cần trả lời câu mấy ví dụ câu 1  đáp án đúng là (A/B/C/D)  "
+    "nhắn lại 3 lần. ví dụ câu 1  đáp án đúng là (A/B/C/D),câu 1  đáp án đúng là (A/B/C/D),câu 1  đáp án đúng là (A/B/C/D) "
 )
 
 # --- Tuning constants -------------------------------------------------------
