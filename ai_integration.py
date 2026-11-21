@@ -41,13 +41,13 @@ class AIIntegration:
             'openai': {
                 'default': os.getenv('OPENAI_MODEL', 'gpt-5.6-terra'),
                 'advanced': os.getenv('OPENAI_MODEL_ADVANCED', 'gpt-5.6-sol'),
-                'max_tokens': 1000,
+                'max_tokens': 4000,
                 'temperature': 0.1
             },
             'claude': {
                 'default': os.getenv('CLAUDE_MODEL', 'claude-haiku-5-5'),
                 'advanced': os.getenv('CLAUDE_MODEL_ADVANCED', 'claude-sonnet-5-5'),
-                'max_tokens': 1000,
+                'max_tokens': 4000,
                 'temperature': 0.1
             },
             'gemini': {
@@ -166,7 +166,6 @@ class AIIntegration:
                 system=SYSTEM_PROMPT,
                 model=self.models['claude']['default'],
                 max_tokens=self.models['claude']['max_tokens'],
-                temperature=0.1,  # Lower temperature for more consistent answers
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
@@ -200,6 +199,7 @@ class AIIntegration:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.models['gemini']['default']}:generateContent"
 
             payload = {
+                "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
                 "contents": [{
                     "parts": [{
                         "text": prompt
