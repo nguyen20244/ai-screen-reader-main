@@ -39,20 +39,20 @@ class AIIntegration:
         # Model configurations
         self.models = {
             'openai': {
-                'default': os.getenv('OPENAI_MODEL', 'gpt-3.5-turbo'),
-                'advanced': os.getenv('OPENAI_MODEL_ADVANCED', 'gpt-4'),
+                'default': os.getenv('OPENAI_MODEL', 'gpt-5.6-terra'),
+                'advanced': os.getenv('OPENAI_MODEL_ADVANCED', 'gpt-5.6-sol'),
                 'max_tokens': 1000,
                 'temperature': 0.1
             },
             'claude': {
-                'default': os.getenv('CLAUDE_MODEL', 'claude-3-haiku-20240307'),
-                'advanced': os.getenv('CLAUDE_MODEL_ADVANCED', 'claude-3-sonnet-20240229'),
+                'default': os.getenv('CLAUDE_MODEL', 'claude-haiku-5-5'),
+                'advanced': os.getenv('CLAUDE_MODEL_ADVANCED', 'claude-sonnet-5-5'),
                 'max_tokens': 1000,
                 'temperature': 0.1
             },
             'gemini': {
-                'default': os.getenv('GEMINI_MODEL', 'gemini-1.5-flash'),
-                'advanced': os.getenv('GEMINI_MODEL_ADVANCED', 'gemini-1.5-flash'),
+                'default': os.getenv('GEMINI_MODEL', 'gemini-3.5-flash-lite'),
+                'advanced': os.getenv('GEMINI_MODEL_ADVANCED', 'gemini-3.8-flash'),
                 'max_tokens': 1000,
                 'temperature': 0.1
             }
@@ -135,8 +135,7 @@ class AIIntegration:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=self.models['openai']['max_tokens'],
-                temperature=0.1  # Lower temperature for more consistent answers
+                max_completion_tokens=self.models['openai']['max_tokens'],
             )
             
             processing_time = time.time() - start_time

@@ -77,7 +77,8 @@ class AutomationEngine:
         # Start the automation loop
         self.is_running = True
         self.stats['start_time'] = datetime.now()
-        self.current_thread = threading.Thread(target=self._automation_loop, daemon=True)
+        self._run_id = getattr(self, '_run_id', 0) + 1
+        self.current_thread = threading.Thread(target=self._automation_loop, args=(self._run_id,), daemon=True)
         self.current_thread.start()
         
         self.logger.info(f"Automation engine started with {config.refresh_interval}s interval")
@@ -90,18 +91,16 @@ class AutomationEngine:
             return
         
         self.is_running = False
-        
-        # Wait for thread to finish (with timeout)
-        if self.current_thread and self.current_thread.is_alive():
-            self.current_thread.join(timeout=5.0)
+        # Không join ở đây: stop() được gọi từ luồng GUI nên không được chặn.
+        # Luồng cũ tự thoát khi run_id không còn khớp.
         
         self.logger.info("Automation engine stopped")
     
-    def _automation_loop(self):
+    def _automation_loop(self, run_id=None):
         """Main automation loop (runs in separate thread)"""
         self.logger.info("Starting automation loop")
         
-        while self.is_running:
+        while self.is_running and (run_id is None or run_id == self._run_id):
             try:
                 # Perform one scan cycle
                 self._perform_scan_cycle()
