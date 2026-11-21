@@ -4,6 +4,7 @@ Coordinates screen capture, OCR, question detection, and AI responses
 """
 import threading
 import time
+import hashlib
 import logging
 from typing import Optional, List, Callable
 from datetime import datetime
@@ -31,6 +32,8 @@ class AutomationEngine:
         # State management
         self.is_running = False
         self.current_thread: Optional[threading.Thread] = None
+        self._last_hash = None
+        self._answer_cache = {}
         self.last_text = ""
         self.last_questions: List[Question] = []
         self.last_responses: List[AIResponse] = []
@@ -119,83 +122,59 @@ class AutomationEngine:
         self.logger.info("Automation loop ended")
     
     def _perform_scan_cycle(self):
-        """Perform one complete scan cycle"""
+        """Perform one scan cycle: capture -> OCR -> detect -> AI (cached) -> GUI."""
         cycle_start = time.time()
-        
-        # Step 1: Capture screen
-        self.logger.debug("Capturing screen...")
         screenshot = self.screen_capture.capture_screen()
         if not screenshot:
             self.logger.error("Failed to capture screen")
             return
-        
-        # Step 2: Extract text using OCR
-        self.logger.debug("Extracting text...")
-        extracted_text = self.ocr_processor.extract_text_from_image(screenshot)
+
+        extracted_text = self.ocr_processor.extract_text_from_image(screenshot) or ""
         if not extracted_text:
             self.logger.warning("No text extracted from screen")
-            extracted_text = ""
-        
-        # Update GUI with extracted text
-        self._call_gui_callback('update_text', extracted_text)
-        
-        # Step 3: Detect questions
-        self.logger.debug("Detecting questions...")
-        questions = self.question_detector.detect_questions(extracted_text)
-        
-        # Update GUI with questions
-        self._call_gui_callback('update_questions', questions)
-        
-        if questions:
-            self.logger.info(f"Detected {len(questions)} questions")
-            self.stats['questions_detected'] += len(questions)
-            
-            # Step 4: Get AI answers for questions
-            self.logger.debug("Getting AI answers...")
-            responses = []
-            
-            for question in questions:
-                try:
-                    response = self.ai_integration.answer_question(
-                        question, 
-                        config.default_ai_provider
-                    )
-                    responses.append(response)
-                    self.stats['ai_queries_made'] += 1
-                    
-                    self.logger.info(f"Got answer for: {question.text[:50]}...")
-                    
-                    # Small delay between API calls to avoid rate limiting
-                    time.sleep(0.5)
-                    
-                except Exception as e:
-                    self.logger.error(f"Failed to get AI answer: {e}")
-                    error_response = AIResponse(
-                        answer=f"Error: {str(e)}",
-                        provider=config.default_ai_provider,
-                        model="error",
-                        error=str(e)
-                    )
-                    responses.append(error_response)
-            
-            # Update GUI with answers
-            self._call_gui_callback('update_answers', responses)
-            
-            # Store results
-            self.last_questions = questions
-            self.last_responses = responses
-        else:
-            self.logger.debug("No questions detected")
-        
-        # Store current text
         self.last_text = extracted_text
-        
-        # Update last scan time in GUI
+        self._call_gui_callback('update_text', extracted_text)
+
+        provider = config.default_ai_provider
+        # Nothing changed on screen (same text, same provider): skip detection and AI calls
+        state_hash = hashlib.sha1(f"{provider}\n{extracted_text}".encode('utf-8')).hexdigest()
+        if state_hash == self._last_hash:
+            self._call_gui_callback('update_last_scan')
+            return
+
+        questions = self.question_detector.detect_questions(extracted_text)
+        self._call_gui_callback('update_questions', questions)
+        self.stats['questions_detected'] += len(questions)
+
+        responses = []
+        had_error = False
+        for question in questions:
+            key = (provider, question.text)
+            if key in self._answer_cache:
+                responses.append(self._answer_cache[key])
+                continue
+            try:
+                response = self.ai_integration.answer_question(question, provider)
+                self.stats['ai_queries_made'] += 1
+                time.sleep(0.5)
+            except Exception as e:
+                self.logger.error(f"Failed to get AI answer: {e}")
+                response = AIResponse(answer=f"Error: {e}", provider=provider, model="error", error=str(e))
+            if response.error:
+                had_error = True  # do not cache failures; retry on the next cycle
+            else:
+                self._answer_cache[key] = response
+            responses.append(response)
+
+        # Retry next cycle if any answer failed; otherwise remember this screen state
+        self._last_hash = None if had_error else state_hash
+        self.last_questions = questions
+        self.last_responses = responses
+        # Always send, even when empty, so answers from the previous screen are cleared
+        self._call_gui_callback('update_answers', responses)
         self._call_gui_callback('update_last_scan')
-        
-        cycle_time = time.time() - cycle_start
-        self.logger.debug(f"Scan cycle completed in {cycle_time:.2f}s")
-    
+        self.logger.debug(f"Scan cycle completed in {time.time() - cycle_start:.2f}s")
+
     def _wait_for_next_cycle(self):
         """Wait for the next scan cycle with interruption support"""
         wait_time = config.refresh_interval

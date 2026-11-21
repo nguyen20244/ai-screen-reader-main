@@ -2,6 +2,7 @@
 AI integration module for the AI Screen Reader
 Supports both OpenAI (ChatGPT) and Anthropic (Claude) APIs
 """
+import os
 import openai
 import anthropic
 import logging
@@ -38,20 +39,20 @@ class AIIntegration:
         # Model configurations
         self.models = {
             'openai': {
-                'default': 'gpt-3.5-turbo',
-                'advanced': 'gpt-4',
+                'default': os.getenv('OPENAI_MODEL', 'gpt-3.5-turbo'),
+                'advanced': os.getenv('OPENAI_MODEL_ADVANCED', 'gpt-4'),
                 'max_tokens': 1000,
                 'temperature': 0.1
             },
             'claude': {
-                'default': 'claude-3-haiku-20240307',
-                'advanced': 'claude-3-sonnet-20240229',
+                'default': os.getenv('CLAUDE_MODEL', 'claude-3-haiku-20240307'),
+                'advanced': os.getenv('CLAUDE_MODEL_ADVANCED', 'claude-3-sonnet-20240229'),
                 'max_tokens': 1000,
                 'temperature': 0.1
             },
             'gemini': {
-                'default': 'gemini-1.5-flash',
-                'advanced': 'gemini-1.5-flash',
+                'default': os.getenv('GEMINI_MODEL', 'gemini-1.5-flash'),
+                'advanced': os.getenv('GEMINI_MODEL_ADVANCED', 'gemini-1.5-flash'),
                 'max_tokens': 1000,
                 'temperature': 0.1
             }
