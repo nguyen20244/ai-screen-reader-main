@@ -7,6 +7,13 @@ from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from config import config
 
+# MCQ option line patterns
+LETTER_OPTION_RE = re.compile(r'^\(?[A-Da-d][.)]\s*\S')
+LETTER_OPTION_PATTERNS = [r'^[A-D]\)\s*(.+)', r'^[A-D]\.\s*(.+)', r'^\([A-D]\)\s*(.+)']
+NUMBER_OPTION_PATTERNS = [r'^[1-4]\)\s*(.+)', r'^[1-4]\.\s*(.+)']
+# Pattern types that must not produce a question on their own
+SKIP_AS_QUESTION = {'mcq_options', 'true_false'}
+
 @dataclass
 class Question:
     """Data class for detected questions"""
@@ -77,92 +84,61 @@ class QuestionDetector:
         ]
     
     def detect_questions(self, text: str) -> List[Question]:
-        """
-        Detect questions from text
-        
-        Args:
-            text: Input text to analyze
-            
-        Returns:
-            List of detected Question objects
-        """
+        """Detect questions line by line. Each line yields at most one question."""
         if not text:
             return []
-        
+        lines = [line.strip() for line in text.split('\n')]
         questions = []
-        lines = text.split('\n')
-        
-        # Process each line
         for i, line in enumerate(lines):
-            line = line.strip()
-            if not line:
+            # Option lines (A) B) C) D)) are answers, not questions
+            if not line or LETTER_OPTION_RE.match(line):
                 continue
-                
-            # Check each question pattern
-            for q_type, pattern_info in self.question_patterns.items():
-                matches = re.findall(pattern_info['pattern'], line)
-                if matches:
-                    for match in matches:
-                        question_text = match if isinstance(match, str) else match[0]
-                        
-                        # Get context (surrounding lines)
-                        context = self._get_context(lines, i, 2)
-                        
-                        # Detect options if it's an MCQ
-                        options = self._detect_mcq_options(lines, i)
-                        
-                        question = Question(
-                            text=question_text.strip(),
-                            question_type=q_type,
-                            confidence=pattern_info['confidence'],
-                            options=options,
-                            context=context,
-                            line_number=i
-                        )
-                        
-                        questions.append(question)
-                        self.logger.debug(f"Detected {q_type}: {question_text[:50]}...")
-        
-        # Remove duplicates and sort by confidence
+            for q_type, info in self.question_patterns.items():
+                if q_type in SKIP_AS_QUESTION:
+                    continue
+                m = re.search(info['pattern'], line)
+                if not m:
+                    continue
+                if q_type == 'numbered_question':
+                    raw = m.group(2)  # text after the "1." prefix
+                else:
+                    raw = m.group(1) if m.groups() else m.group(0)
+                q_text = raw.strip()
+                if not q_text:
+                    continue
+                questions.append(Question(
+                    text=q_text,
+                    question_type=q_type,
+                    confidence=info['confidence'],
+                    options=self._detect_mcq_options(lines, i),
+                    context=self._get_context(lines, i, 2),
+                    line_number=i,
+                ))
+                break  # one question per line
         questions = self._remove_duplicates(questions)
         questions.sort(key=lambda q: q.confidence, reverse=True)
-        
         self.logger.info(f"Detected {len(questions)} questions")
         return questions
-    
+
     def _detect_mcq_options(self, lines: List[str], question_line: int) -> Optional[List[str]]:
-        """
-        Detect MCQ options following a question
-        
-        Args:
-            lines: All text lines
-            question_line: Index of the question line
-            
-        Returns:
-            List of option texts or None
-        """
+        """Collect A)-D) options after a question. Numeric 1)-4) options are only used for unnumbered questions."""
+        patterns = list(LETTER_OPTION_PATTERNS)
+        if not re.match(r'^\d+[.)]\s', lines[question_line]):
+            patterns += NUMBER_OPTION_PATTERNS
         options = []
-        
-        # Look for options in the next few lines
-        for i in range(question_line + 1, min(question_line + 6, len(lines))):
-            line = lines[i].strip()
+        for line in lines[question_line + 1: question_line + 6]:
             if not line:
                 continue
-                
-            # Check if line matches any MCQ option pattern
-            for pattern in self.mcq_option_patterns:
+            for pattern in patterns:
                 match = re.match(pattern, line, re.IGNORECASE)
                 if match:
-                    option_text = match.group(1).strip()
-                    options.append(option_text)
+                    options.append(match.group(1).strip())
                     break
             else:
-                # If line doesn't match option pattern, stop looking
-                if options:  # Only stop if we already found some options
+                if options:  # stop once the option block ends
                     break
-        
         return options if len(options) >= 2 else None
-    
+
     def _get_context(self, lines: List[str], line_index: int, context_size: int = 2) -> str:
         """
         Get context around a specific line
@@ -182,28 +158,17 @@ class QuestionDetector:
         return '\n'.join(context_lines)
     
     def _remove_duplicates(self, questions: List[Question]) -> List[Question]:
-        """
-        Remove duplicate questions based on text similarity
-        
-        Args:
-            questions: List of Question objects
-            
-        Returns:
-            List with duplicates removed
-        """
+        """Drop repeated questions. Ignores case, extra spaces, trailing punctuation and leading numbering."""
         unique_questions = []
-        seen_texts = set()
-        
+        seen = set()
         for question in questions:
-            # Normalize text for comparison
-            normalized = re.sub(r'\s+', ' ', question.text.lower().strip())
-            
-            if normalized not in seen_texts:
-                seen_texts.add(normalized)
+            key = re.sub(r'^\d+[.)]\s+', '', question.text.lower())
+            key = re.sub(r'[\s?.!:]+$', '', re.sub(r'\s+', ' ', key)).strip()
+            if key and key not in seen:
+                seen.add(key)
                 unique_questions.append(question)
-        
         return unique_questions
-    
+
     def format_question_for_ai(self, question: Question) -> str:
         """
         Format a question for AI processing

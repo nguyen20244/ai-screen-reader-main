@@ -2,6 +2,7 @@
 AI integration module for the AI Screen Reader
 Supports both OpenAI (ChatGPT) and Anthropic (Claude) APIs
 """
+import os
 import openai
 import anthropic
 import logging
@@ -9,6 +10,8 @@ from typing import Optional, Dict, List
 from dataclasses import dataclass
 from config import config
 from question_detector import Question
+
+SYSTEM_PROMPT = "You are an expert assistant that provides ONE definitive answer to each question. Never say 'it could be' or list multiple possibilities. For multiple choice questions, state ONLY the correct letter (A, B, C, or D) followed by a brief explanation. Be decisive and confident in your answer."
 
 @dataclass
 class AIResponse:
@@ -36,20 +39,20 @@ class AIIntegration:
         # Model configurations
         self.models = {
             'openai': {
-                'default': 'gpt-3.5-turbo',
-                'advanced': 'gpt-4',
+                'default': os.getenv('OPENAI_MODEL', 'gpt-5.6-terra'),
+                'advanced': os.getenv('OPENAI_MODEL_ADVANCED', 'gpt-5.6-sol'),
                 'max_tokens': 1000,
                 'temperature': 0.1
             },
             'claude': {
-                'default': 'claude-3-haiku-20240307',
-                'advanced': 'claude-3-sonnet-20240229',
+                'default': os.getenv('CLAUDE_MODEL', 'claude-haiku-5-5'),
+                'advanced': os.getenv('CLAUDE_MODEL_ADVANCED', 'claude-sonnet-5-5'),
                 'max_tokens': 1000,
                 'temperature': 0.1
             },
             'gemini': {
-                'default': 'gemini-1.5-flash',
-                'advanced': 'gemini-1.5-flash',
+                'default': os.getenv('GEMINI_MODEL', 'gemini-3.5-flash-lite'),
+                'advanced': os.getenv('GEMINI_MODEL_ADVANCED', 'gemini-3.8-flash'),
                 'max_tokens': 1000,
                 'temperature': 0.1
             }
@@ -129,11 +132,10 @@ class AIIntegration:
             response = self.openai_client.chat.completions.create(
                 model=self.models['openai']['default'],
                 messages=[
-                    {"role": "system", "content": "You are an expert assistant that provides ONE definitive answer to each question. Never say 'it could be' or list multiple possibilities. For multiple choice questions, state ONLY the correct letter (A, B, C, or D) followed by a brief explanation. Be decisive and confident in your answer."},
+                    {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=self.models['openai']['max_tokens'],
-                temperature=0.1  # Lower temperature for more consistent answers
+                max_completion_tokens=self.models['openai']['max_tokens'],
             )
             
             processing_time = time.time() - start_time
@@ -161,6 +163,7 @@ class AIIntegration:
         
         try:
             response = self.anthropic_client.messages.create(
+                system=SYSTEM_PROMPT,
                 model=self.models['claude']['default'],
                 max_tokens=self.models['claude']['max_tokens'],
                 temperature=0.1,  # Lower temperature for more consistent answers
@@ -194,7 +197,7 @@ class AIIntegration:
         start_time = time.time()
 
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.models['gemini']['default']}:generateContent"
 
             payload = {
                 "contents": [{
@@ -204,7 +207,7 @@ class AIIntegration:
                 }]
             }
 
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(url, json=payload, headers={"x-goog-api-key": self.gemini_api_key}, timeout=30)
 
             if response.status_code == 200:
                 result = response.json()

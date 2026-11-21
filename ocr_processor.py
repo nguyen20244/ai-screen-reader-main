@@ -123,33 +123,16 @@ class OCRProcessor:
     
     def clean_text(self, text: str) -> str:
         """
-        Clean and normalize extracted text
-        
-        Args:
-            text: Raw text from OCR
-            
-        Returns:
-            Cleaned text string
+        Clean and normalize extracted text.
+        Line breaks are preserved so questions and A) B) C) D) options stay line-based.
+        Digits and identifiers are not altered.
         """
         if not text:
             return ""
-        
-        # Remove excessive whitespace
-        text = re.sub(r'\s+', ' ', text)
-        
-        # Remove leading/trailing whitespace
-        text = text.strip()
-        
-        # Fix common OCR errors
-        text = text.replace('|', 'I')  # Common OCR mistake
-        text = text.replace('0', 'O')  # In some contexts
-        text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)  # Add space between camelCase
-        
-        # Normalize line breaks
-        text = re.sub(r'\n+', '\n', text)
-        
-        return text
-    
+
+        lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.splitlines()]
+        return '\n'.join(line for line in lines if line)
+
     def get_text_with_confidence(self, image: Image.Image) -> Dict:
         """
         Extract text with confidence scores

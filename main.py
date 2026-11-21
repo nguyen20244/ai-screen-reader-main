@@ -117,10 +117,10 @@ class ScreenReaderApp:
         
         # Initialize automation engine with GUI callbacks
         gui_callbacks = {
-            'update_text': self.gui.update_text_display,
-            'update_questions': self.gui.update_questions_display,
-            'update_answers': self.gui.update_answers_display,
-            'update_last_scan': self.gui.update_last_scan
+            'update_text': lambda t: self.gui.post_ui(self.gui.update_text_display, t),
+            'update_questions': lambda q: self.gui.post_ui(self.gui.update_questions_display, q),
+            'update_answers': lambda r: self.gui.post_ui(self.gui.update_answers_display, r),
+            'update_last_scan': lambda: self.gui.post_ui(self.gui.update_last_scan)
         }
         
         self.automation_engine = AutomationEngine(gui_callbacks)
@@ -135,7 +135,10 @@ class ScreenReaderApp:
         """Connect GUI controls to automation engine"""
         # Override GUI's reading loop with actual implementation
         def reading_loop():
-            interval = int(self.gui.interval_var.get())
+            try:
+                interval = int(self.gui.interval_var.get())
+            except ValueError:
+                interval = None  # None -> engine uses config default
             provider = self.gui.provider_var.get()
             
             if not self.automation_engine.start(interval, provider):
@@ -143,15 +146,7 @@ class ScreenReaderApp:
                 messagebox.showerror("Error", "Failed to start automation engine")
                 return
             
-            # Keep the GUI responsive while automation runs
-            while self.gui.is_running and self.automation_engine.is_running:
-                self.gui.root.update()
-                import time
-                time.sleep(0.1)
-            
-            # Stop automation if GUI stopped
-            if not self.gui.is_running:
-                self.automation_engine.stop()
+            # Engine runs in its own worker thread; the Tk main loop keeps the UI responsive
         
         # Replace the GUI's reading loop
         self.gui.reading_loop = reading_loop
