@@ -36,3 +36,6 @@ desktop.ini
 .mypy_cache/
 # Browser profile and personal data
 data/gemini_profile/
+
+# Ảnh test sinh ra khi chạy test
+test_*.png
