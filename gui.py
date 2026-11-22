@@ -4,6 +4,7 @@ GUI interface for the AI Screen Reader
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import threading
+import queue
 import logging
 from datetime import datetime
 from typing import Optional, List
@@ -37,6 +38,8 @@ class ScreenReaderGUI:
         
         # Create GUI components
         self.create_widgets()
+        self._ui_queue = queue.Queue()
+        self.root.after(100, self._pump_ui_queue)
         self.setup_logging_handler()
         
         # Configure styles
@@ -301,14 +304,16 @@ class ScreenReaderGUI:
         self.status_label.config(text="Status: Running", foreground="green")
         
         # Update config with current settings
-        config.refresh_interval = int(self.interval_var.get())
+        try:
+            config.refresh_interval = int(self.interval_var.get())
+        except ValueError:
+            pass  # keep previous value
         config.default_ai_provider = self.provider_var.get()
         
         self.logger.info("Screen reading started")
         
         # Start reading in separate thread
-        self.reading_thread = threading.Thread(target=self.reading_loop, daemon=True)
-        self.reading_thread.start()
+        self.reading_loop()  # engine runs in its own worker thread
     
     def stop_reading(self):
         """Stop the screen reading process"""
@@ -322,6 +327,23 @@ class ScreenReaderGUI:
         # This will be implemented in the automation engine
         pass
     
+    def post_ui(self, fn, *args):
+        """Thread-safe: may be called from any thread; fn runs later on the Tk main thread."""
+        self._ui_queue.put((fn, args))
+
+    def _pump_ui_queue(self):
+        """Runs on the Tk main thread every 100 ms and applies queued UI updates."""
+        try:
+            while True:
+                fn, args = self._ui_queue.get_nowait()
+                try:
+                    fn(*args)
+                except Exception as e:
+                    self.logger.error(f"UI update failed: {e}")
+        except queue.Empty:
+            pass
+        self.root.after(100, self._pump_ui_queue)
+
     def update_text_display(self, text: str):
         """Update the extracted text display"""
         self.text_display.config(state=tk.NORMAL)

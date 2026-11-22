@@ -8,3 +8,4 @@ anthropic>=0.7.0
 tkinter-tooltip>=2.0.0
 python-dotenv>=1.0.0
 threading-timer>=1.0.0
+requests>=2.31.0
